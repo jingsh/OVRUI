@@ -308,7 +308,7 @@ export default class Player {
       fullscreenButtonHandler: this.attemptEnterFullscreen,
       hideCompass: options.hideCompass,
       hideFullscreen: options.hideFullscreen,
-      resetAngles: isMobile ? null : this.resetAngles,
+      resetAngles: this.resetAngles,
     });
     this.overlay = overlay;
     if (isVRBrowser() || this.allowCarmelDeeplink) {
@@ -522,11 +522,7 @@ export default class Player {
       return Promise.reject('Cannot enter VR, no display detected');
     }
     return this.effect
-      .requestPresent([
-        {
-          source: this.glRenderer.domElement,
-        },
-      ])
+      .requestPresent()
       .then(
         () => {
           this.onEnterVR && this.onEnterVR();

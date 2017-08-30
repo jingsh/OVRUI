@@ -217,11 +217,14 @@ var toConsumableArray = function (arr) {
   }
 };
 
+var X_UNIT = new THREE.Vector3(1, 0, 0);
 var Y_UNIT$1 = new THREE.Vector3(0, 1, 0);
+var Z_UNIT$1 = new THREE.Vector3(0, 0, 1);
 
 var rotation$1 = new THREE.Quaternion();
 
-var PAN_SPEED = 0.5;
+var YAW_SPEED = 0.5;
+var PITCH_SPEED = 0.25;
 
 var MIN_FOV = 10;
 
@@ -233,12 +236,14 @@ var MobilePanControls = function () {
     this._target = target || window;
 
     this.enabled = true;
-
-    this._panStart = new THREE.Vector2();
-    this._panEnd = new THREE.Vector2();
-    this._panDelta = new THREE.Vector2();
-    this._theta = 0;
     this._tracking = false;
+
+    this._swipeStart = new THREE.Vector2();
+    this._swipeEnd = new THREE.Vector2();
+    this._swipeDelta = new THREE.Vector2();
+
+    this._yaw = 0;
+    this._pitch = 0;
 
     this._pinchLengthStart = 0;
     this._pinchLengthEnd = 0;
@@ -271,6 +276,15 @@ var MobilePanControls = function () {
       this.enabled = false;
     }
   }, {
+    key: 'resetRotation',
+    value: function resetRotation(x, y, z) {
+      this._yaw = y;
+      this._pitch = x;
+
+      this._camera.fov = this._originalFov;
+      this._camera.updateProjectionMatrix();
+    }
+  }, {
     key: '_downHandler',
     value: function _downHandler(e) {
       this._tracking = true;
@@ -283,7 +297,7 @@ var MobilePanControls = function () {
         return;
       }
       var touch = e.touches[0];
-      this._panStart.set(touch.pageX, touch.pageY);
+      this._swipeStart.set(touch.pageX, touch.pageY);
     }
   }, {
     key: '_upHandler',
@@ -306,14 +320,21 @@ var MobilePanControls = function () {
       }
 
       var touch = e.touches[0];
-      this._panEnd.set(touch.pageX, touch.pageY);
-      this._panDelta.subVectors(this._panEnd, this._panStart);
-      this._panStart.copy(this._panEnd);
-
-      this._panDelta.x *= -1;
+      this._swipeEnd.set(touch.pageX, touch.pageY);
+      this._swipeDelta.subVectors(this._swipeEnd, this._swipeStart);
+      this._swipeStart.copy(this._swipeEnd);
 
       var element = document.body;
-      this._theta += 2 * Math.PI * this._panDelta.x / element.clientWidth * PAN_SPEED;
+
+      if (Math.abs(this._swipeDelta.y) > Math.abs(this._swipeDelta.x)) {
+        var _rotation = 2 * Math.PI * this._swipeDelta.y / element.clientHeight * PITCH_SPEED;
+
+        if (Math.abs(this._pitch + _rotation) <= THREE.Math.degToRad(90)) {
+          this._pitch += _rotation;
+        }
+      } else {
+        this._yaw += 2 * Math.PI * this._swipeDelta.x / element.clientWidth * YAW_SPEED;
+      }
     }
   }, {
     key: 'update',
@@ -323,7 +344,9 @@ var MobilePanControls = function () {
       }
 
       var quaternion = this._camera.quaternion;
-      rotation$1.setFromAxisAngle(Y_UNIT$1, -this._theta);
+      rotation$1.setFromAxisAngle(X_UNIT, this._pitch);
+      quaternion.multiply(rotation$1);
+      rotation$1.setFromAxisAngle(Y_UNIT$1, this._yaw);
       quaternion.premultiply(rotation$1);
 
       if (this._zoomNeedsUpdate) {
@@ -416,7 +439,18 @@ var DeviceOrientationControls = function () {
     }
   }, {
     key: 'resetRotation',
-    value: function resetRotation(x, y, z) {}
+    value: function resetRotation(x, y, z) {
+      var quaternion = this.camera.quaternion;
+      euler.set(x, y, -z, 'YXZ');
+      quaternion.setFromEuler(euler);
+
+      this.deviceOrientation = {};
+      this._initialAlpha = null;
+
+      if (this.mobilePanControls.enabled) {
+        this.mobilePanControls.resetRotation(0, 0, 0);
+      }
+    }
   }, {
     key: 'update',
     value: function update() {
@@ -1397,9 +1431,9 @@ var StereoTextureUniforms = function StereoTextureUniforms() {
 };
 
 var StereoShaderLib = {
-  stereo_basic_vert: "\n      uniform vec4 stereoOffsetRepeat;\n      uniform vec3 color;\n      #ifdef USE_ENVMAP\n        varying vec3 vWorldPosition;\n        varying vec3 vNormal;\n      #endif\n      varying lowp vec3 vColor;\n      #ifdef USE_MAP\n        varying highp vec2 vUv;\n      #endif\n      void main()\n      {\n          #ifdef USE_MAP\n            vUv = uv * stereoOffsetRepeat.zw + stereoOffsetRepeat.xy;\n          #endif\n          vColor = color;\n\n          #ifdef USE_ENVMAP\n            vec4 worldPosition = modelMatrix * vec4( position, 1.0 );\n            vWorldPosition = worldPosition.xyz;\n            vNormal = normalMatrix * normal;\n          #endif\n\n          gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );\n      }\n  ",
+  stereo_basic_vert: "\n      uniform vec4 stereoOffsetRepeat;\n      varying highp vec3 vPosition;\n      #ifndef USE_ENVMAP\n      varying highp vec2 vUv;\n      #endif\n      void main()\n      {\n          vPosition = position;\n          #ifndef USE_ENVMAP\n          vUv = uv * stereoOffsetRepeat.zw + stereoOffsetRepeat.xy;\n          #endif\n          gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );\n      }\n  ",
 
-  stereo_basic_frag: "\n      #define RECIPROCAL_PI2 0.15915494\n      uniform vec4 stereoOffsetRepeat;\n      uniform float opacity;\n      uniform sampler2D map;\n      #ifdef USE_ENVMAP\n        varying vec3 vWorldPosition;\n        varying vec3 vNormal;\n        #ifdef ENVMAP_TYPE_CUBE\n          uniform samplerCube envMap;\n        #else\n          uniform sampler2D envMap;\n        #endif\n        uniform float reflectivity;\n        uniform float flipEnvMap;\n        uniform float refractionRatio;\n      #endif\n      #ifdef USE_MAP\n        varying highp vec2 vUv;\n      #endif\n      varying lowp vec3 vColor;\n      void main()\n      {\n        vec4 diffuseColor = vec4( 1.0, 1.0, 1.0, opacity );\n\n        #ifdef DOUBLE_SIDED\n          float flipNormal = ( float( gl_FrontFacing ) * 2.0 - 1.0 );\n        #else\n          float flipNormal = 1.0;\n        #endif\n\n        #ifdef USE_MAP\n          vec4 texColor = texture2D( map, vUv );\n          diffuseColor *= texColor;\n        #endif\n\n        #ifdef USE_ENVMAP\n          vec3 cameraToVertex = normalize( vWorldPosition - cameraPosition );\n          vec3 worldNormal = normalize( ( vec4( vNormal, 0.0 ) * viewMatrix ).xyz );\n          vec3 reflectVec = refract( cameraToVertex, worldNormal, refractionRatio );\n\n          #ifdef ENVMAP_TYPE_CUBE\n            vec4 envColor = textureCube( envMap, flipNormal * vec3( flipEnvMap * reflectVec.x, reflectVec.yz ) );\n          #elif defined( ENVMAP_TYPE_EQUIREC )\n            vec2 sampleUV;\n            sampleUV.y = saturate( flipNormal * reflectVec.y * 0.5 + 0.5 );\n            sampleUV.x = atan( flipNormal * reflectVec.z, flipNormal * reflectVec.x ) * RECIPROCAL_PI2 + 0.5;\n            vec2 stereoSampleUV = sampleUV * stereoOffsetRepeat.zw + stereoOffsetRepeat.xy;\n            vec4 envColor = texture2D( envMap, stereoSampleUV );\n          #elif defined( ENVMAP_TYPE_SPHERE )\n            vec3 reflectView = flipNormal * normalize( ( viewMatrix * vec4( reflectVec, 0.0 ) ).xyz\n              + vec3( 0.0, 0.0, 1.0 ) );\n            vec2 sampleUV = reflectView.xy * 0.5 + 0.5;\n            vec2 stereoSampleUV = sampleUV * stereoOffsetRepeat.zw + stereoOffsetRepeat.xy;\n            vec4 envColor = texture2D( envMap, stereoSampleUV );\n          #else\n            vec4 envColor = vec4( 0.0 );\n          #endif\n          diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * envColor.rgb, reflectivity );\n        #endif\n\n        diffuseColor.rgb *= vColor;\n        gl_FragColor = diffuseColor;\n      }\n  "
+  stereo_basic_frag: "\n      #define RECIPROCAL_PI2 0.15915494\n      #define RECIPROCAL_PI 0.31830988\n      uniform vec4 stereoOffsetRepeat;\n      uniform vec3 color;\n      uniform float opacity;\n      uniform float useUV;\n      #ifdef ENVMAP_TYPE_CUBE\n      uniform samplerCube envMap;\n      #else\n      uniform sampler2D map;\n      varying highp vec2 vUv;\n      #endif\n      varying highp vec3 vPosition;\n      void main()\n      {\n        vec4 diffuseColor = vec4( 1.0, 1.0, 1.0, opacity );\n\n        #ifdef ENVMAP_TYPE_CUBE\n        vec4 texColor = textureCube( envMap, vec3( vPosition.z, vPosition.yx ) );\n        #else\n        vec2 sampleUV;\n        if (useUV > 0.0) {\n          sampleUV = vUv;\n        } else {\n          vec3 nrm = normalize(vPosition);\n          sampleUV.y = asin(nrm.y) * RECIPROCAL_PI + 0.5;\n          sampleUV.x = -atan( nrm.z, nrm.x ) * RECIPROCAL_PI2 + 0.5;\n          sampleUV = sampleUV * stereoOffsetRepeat.zw + stereoOffsetRepeat.xy;\n        }\n        vec4 texColor = texture2D( map, sampleUV );\n        #endif\n        diffuseColor *= texColor;\n        diffuseColor.rgb *= color;\n\n        gl_FragColor = diffuseColor;\n      }\n  "
 };
 
 var DEFAULT_UNIFORM_COLOR = new THREE.Color();
@@ -1414,11 +1448,9 @@ var StereoBasicTextureMaterial = function (_THREE$ShaderMaterial) {
     var uniforms = THREE.UniformsUtils.merge([new StereoTextureUniforms(), {
       color: { value: DEFAULT_UNIFORM_COLOR, type: 'f' },
       opacity: { value: 1.0, type: 'f' },
+      useUV: { value: 1.0, type: 'f' },
       map: { value: null, type: 't' },
-      envMap: { value: null, type: 't' },
-      flipEnvMap: { value: 1.0, type: 'f' },
-      reflectivity: { value: 1.0, type: 'f' },
-      refractionRatio: { value: 0.0, type: 'f' } }]);
+      envMap: { value: null, type: 't' } }]);
 
     var _this = possibleConstructorReturn(this, (StereoBasicTextureMaterial.__proto__ || Object.getPrototypeOf(StereoBasicTextureMaterial)).call(this, {
       uniforms: uniforms,
@@ -1468,10 +1500,14 @@ var StereoBasicTextureMaterial = function (_THREE$ShaderMaterial) {
     key: 'envMap',
     set: function set(value) {
       this.uniforms.envMap.value = value;
-      this.uniforms.flipEnvMap.value = !(value && value.isCubeTexture) ? 1 : -1;
     },
     get: function get() {
       return this.uniforms.envMap.value;
+    }
+  }, {
+    key: 'useUV',
+    set: function set(value) {
+      this.uniforms.useUV.value = value;
     }
   }]);
   return StereoBasicTextureMaterial;
@@ -4600,7 +4636,7 @@ var Player = function () {
       fullscreenButtonHandler: this.attemptEnterFullscreen,
       hideCompass: options.hideCompass,
       hideFullscreen: options.hideFullscreen,
-      resetAngles: isMobile ? null : this.resetAngles
+      resetAngles: this.resetAngles
     });
     this.overlay = overlay;
     if (isVRBrowser() || this.allowCarmelDeeplink) {
@@ -4789,9 +4825,7 @@ var Player = function () {
       if (!this.vrDisplay || !this.effect) {
         return Promise.reject('Cannot enter VR, no display detected');
       }
-      return this.effect.requestPresent([{
-        source: this.glRenderer.domElement
-      }]).then(function () {
+      return this.effect.requestPresent().then(function () {
         _this2.onEnterVR && _this2.onEnterVR();
         _this2.overlay.setVRButtonText('Exit VR');
         _this2.overlay.setVRButtonHandler(_this2.exitVR);
