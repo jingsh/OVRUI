@@ -522,7 +522,11 @@ export default class Player {
       return Promise.reject('Cannot enter VR, no display detected');
     }
     return this.effect
-      .requestPresent()
+      .requestPresent([
+        {
+          source: this.glRenderer.domElement,
+        },
+      ])
       .then(
         () => {
           this.onEnterVR && this.onEnterVR();

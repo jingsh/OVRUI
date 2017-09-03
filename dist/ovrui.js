@@ -1284,18 +1284,6 @@ function BitmapFontGeometry(fontObject, text, fontHeight) {
   }
 
   this.type = 'SDFText';
-  this.isSDFText = true;
-  this.onBeforeRender = function (object, material) {
-    if (object.parent.textColor) {
-      material.uniforms.textColor.value.set(object.parent.textColor.r, object.parent.textColor.g, object.parent.textColor.b, object.opacity);
-    }
-    var textClip = object.textClip;
-    if (textClip && object.parent.clippingEnabled) {
-      material.uniforms.clipRegion.value.set(textClip[0], textClip[1], textClip[2], textClip[3]);
-    } else {
-      material.uniforms.clipRegion.value.set(-16384, -16384, 16384, 16384);
-    }
-  };
   this.textClip = [-16384, -16384, 16384, 16384];
   this.addAttribute('position', new THREE.BufferAttribute(positionsBuffer, 3));
   this.addAttribute('uv', new THREE.BufferAttribute(texCoordBuffer, 2));
@@ -1307,7 +1295,7 @@ function BitmapFontGeometry(fontObject, text, fontHeight) {
     materials.push(lastFontObject.material);
   }
   this.computeBoundingSphere();
-  this.materials = materials;
+  this.materials = new THREE.MultiMaterial(materials);
 }
 
 BitmapFontGeometry.prototype = Object.create(THREE.BufferGeometry.prototype);
@@ -1330,11 +1318,26 @@ function loadFont(fontName, fontTexture, loader) {
     },
     textColor: {
       type: 'v4',
-      value: new THREE.Vector4()
+      dynamic: true,
+      value: new THREE.Vector4(),
+      onUpdateCallback: function onUpdateCallback(object, camera) {
+        if (object.parent.textColor) {
+          this.value.set(object.parent.textColor.r, object.parent.textColor.g, object.parent.textColor.b, object.opacity);
+        }
+      }
     },
     clipRegion: {
       type: 'v4',
-      value: new THREE.Vector4(-16384, -16384, 16384, 16384)
+      dynamic: true,
+      value: new THREE.Vector4(-16384, -16384, 16384, 16384),
+      onUpdateCallback: function onUpdateCallback(object, camera) {
+        var textClip = object.textClip;
+        if (textClip && object.parent.clippingEnabled) {
+          this.value.set(textClip[0], textClip[1], textClip[2], textClip[3]);
+        } else {
+          this.value.set(-16384, -16384, 16384, 16384);
+        }
+      }
     }
   };
 
@@ -1406,9 +1409,9 @@ function loadFont(fontName, fontTexture, loader) {
     return font;
   }
 
-  var fileLoader = loader || new THREE.FileLoader();
+  var xhrLoader = loader || new THREE.XHRLoader();
   return new Promise(function (resolve, reject) {
-    fileLoader.load(fontName, function (response) {
+    xhrLoader.load(fontName, function (response) {
       var data = JSON.parse(response);
       initFontData(data);
       font.data = data;
@@ -1425,15 +1428,23 @@ var StereoTextureUniforms = function StereoTextureUniforms() {
   classCallCheck(this, StereoTextureUniforms);
 
   this.stereoOffsetRepeat = {
+    dynamic: true,
     type: 'f',
-    value: new THREE.Vector4(0, 0, 1, 1)
+    value: null,
+    onUpdateCallback: function onUpdateCallback(object, camera) {
+      if (camera.viewID === 1 && object.material.stereoOffsetRepeats[1]) {
+        this.value = object.material.stereoOffsetRepeats[1];
+      } else {
+        this.value = object.material.stereoOffsetRepeats[0];
+      }
+    }
   };
 };
 
 var StereoShaderLib = {
-  stereo_basic_vert: "\n      uniform vec4 stereoOffsetRepeat;\n      varying highp vec3 vPosition;\n      #ifndef USE_ENVMAP\n      varying highp vec2 vUv;\n      #endif\n      void main()\n      {\n          vPosition = position;\n          #ifndef USE_ENVMAP\n          vUv = uv * stereoOffsetRepeat.zw + stereoOffsetRepeat.xy;\n          #endif\n          gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );\n      }\n  ",
+  stereo_basic_vert: "\n      uniform vec4 stereoOffsetRepeat;\n      uniform vec3 color;\n      #ifdef USE_ENVMAP\n        varying vec3 vWorldPosition;\n        varying vec3 vNormal;\n      #endif\n      varying lowp vec3 vColor;\n      #ifdef USE_MAP\n        varying highp vec2 vUv;\n      #endif\n      void main()\n      {\n          #ifdef USE_MAP\n            vUv = uv * stereoOffsetRepeat.zw + stereoOffsetRepeat.xy;\n          #endif\n          vColor = color;\n\n          #ifdef USE_ENVMAP\n            vec4 worldPosition = modelMatrix * vec4( position, 1.0 );\n            vWorldPosition = worldPosition.xyz;\n            vNormal = normalMatrix * normal;\n          #endif\n\n          gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );\n      }\n  ",
 
-  stereo_basic_frag: "\n      #define RECIPROCAL_PI2 0.15915494\n      #define RECIPROCAL_PI 0.31830988\n      uniform vec4 stereoOffsetRepeat;\n      uniform vec3 color;\n      uniform float opacity;\n      uniform float useUV;\n      #ifdef ENVMAP_TYPE_CUBE\n      uniform samplerCube envMap;\n      #else\n      uniform sampler2D map;\n      varying highp vec2 vUv;\n      #endif\n      varying highp vec3 vPosition;\n      void main()\n      {\n        vec4 diffuseColor = vec4( 1.0, 1.0, 1.0, opacity );\n\n        #ifdef ENVMAP_TYPE_CUBE\n        vec4 texColor = textureCube( envMap, vec3( vPosition.z, vPosition.yx ) );\n        #else\n        vec2 sampleUV;\n        if (useUV > 0.0) {\n          sampleUV = vUv;\n        } else {\n          vec3 nrm = normalize(vPosition);\n          sampleUV.y = asin(nrm.y) * RECIPROCAL_PI + 0.5;\n          sampleUV.x = -atan( nrm.z, nrm.x ) * RECIPROCAL_PI2 + 0.5;\n          sampleUV = sampleUV * stereoOffsetRepeat.zw + stereoOffsetRepeat.xy;\n        }\n        vec4 texColor = texture2D( map, sampleUV );\n        #endif\n        diffuseColor *= texColor;\n        diffuseColor.rgb *= color;\n\n        gl_FragColor = diffuseColor;\n      }\n  "
+  stereo_basic_frag: "\n      #define RECIPROCAL_PI2 0.15915494\n      uniform vec4 stereoOffsetRepeat;\n      uniform float opacity;\n      uniform sampler2D map;\n      #ifdef USE_ENVMAP\n        varying vec3 vWorldPosition;\n        varying vec3 vNormal;\n        #ifdef ENVMAP_TYPE_CUBE\n          uniform samplerCube envMap;\n        #else\n          uniform sampler2D envMap;\n        #endif\n        uniform float reflectivity;\n        uniform float flipEnvMap;\n        uniform float refractionRatio;\n      #endif\n      #ifdef USE_MAP\n        varying highp vec2 vUv;\n      #endif\n      varying lowp vec3 vColor;\n      void main()\n      {\n        vec4 diffuseColor = vec4( 1.0, 1.0, 1.0, opacity );\n\n        #ifdef DOUBLE_SIDED\n          float flipNormal = ( float( gl_FrontFacing ) * 2.0 - 1.0 );\n        #else\n          float flipNormal = 1.0;\n        #endif\n\n        #ifdef USE_MAP\n          vec4 texColor = texture2D( map, vUv );\n          diffuseColor *= texColor;\n        #endif\n\n        #ifdef USE_ENVMAP\n          vec3 cameraToVertex = normalize( vWorldPosition - cameraPosition );\n          vec3 worldNormal = normalize( ( vec4( vNormal, 0.0 ) * viewMatrix ).xyz );\n          vec3 reflectVec = refract( cameraToVertex, worldNormal, refractionRatio );\n\n          #ifdef ENVMAP_TYPE_CUBE\n            vec4 envColor = textureCube( envMap, flipNormal * vec3( flipEnvMap * reflectVec.x, reflectVec.yz ) );\n          #elif defined( ENVMAP_TYPE_EQUIREC )\n            vec2 sampleUV;\n            sampleUV.y = saturate( flipNormal * reflectVec.y * 0.5 + 0.5 );\n            sampleUV.x = atan( flipNormal * reflectVec.z, flipNormal * reflectVec.x ) * RECIPROCAL_PI2 + 0.5;\n            vec2 stereoSampleUV = sampleUV * stereoOffsetRepeat.zw + stereoOffsetRepeat.xy;\n            vec4 envColor = texture2D( envMap, stereoSampleUV );\n          #elif defined( ENVMAP_TYPE_SPHERE )\n            vec3 reflectView = flipNormal * normalize( ( viewMatrix * vec4( reflectVec, 0.0 ) ).xyz\n              + vec3( 0.0, 0.0, 1.0 ) );\n            vec2 sampleUV = reflectView.xy * 0.5 + 0.5;\n            vec2 stereoSampleUV = sampleUV * stereoOffsetRepeat.zw + stereoOffsetRepeat.xy;\n            vec4 envColor = texture2D( envMap, stereoSampleUV );\n          #else\n            vec4 envColor = vec4( 0.0 );\n          #endif\n          diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * envColor.rgb, reflectivity );\n        #endif\n\n        diffuseColor.rgb *= vColor;\n        gl_FragColor = diffuseColor;\n      }\n  "
 };
 
 var DEFAULT_UNIFORM_COLOR = new THREE.Color();
@@ -1448,9 +1459,11 @@ var StereoBasicTextureMaterial = function (_THREE$ShaderMaterial) {
     var uniforms = THREE.UniformsUtils.merge([new StereoTextureUniforms(), {
       color: { value: DEFAULT_UNIFORM_COLOR, type: 'f' },
       opacity: { value: 1.0, type: 'f' },
-      useUV: { value: 1.0, type: 'f' },
       map: { value: null, type: 't' },
-      envMap: { value: null, type: 't' } }]);
+      envMap: { value: null, type: 't' },
+      flipEnvMap: { value: 1.0, type: 'f' },
+      reflectivity: { value: 1.0, type: 'f' },
+      refractionRatio: { value: 0.0, type: 'f' } }]);
 
     var _this = possibleConstructorReturn(this, (StereoBasicTextureMaterial.__proto__ || Object.getPrototypeOf(StereoBasicTextureMaterial)).call(this, {
       uniforms: uniforms,
@@ -1500,14 +1513,10 @@ var StereoBasicTextureMaterial = function (_THREE$ShaderMaterial) {
     key: 'envMap',
     set: function set(value) {
       this.uniforms.envMap.value = value;
+      this.uniforms.flipEnvMap.value = !(value && value.isCubeTexture) ? 1 : -1;
     },
     get: function get() {
       return this.uniforms.envMap.value;
-    }
-  }, {
-    key: 'useUV',
-    set: function set(value) {
-      this.uniforms.useUV.value = value;
     }
   }]);
   return StereoBasicTextureMaterial;
@@ -3332,7 +3341,7 @@ function UIView(guiSys, params) {
   this.imageMaterial.transparent = true;
   this.imageMaterial.visible = false;
   this.imageMaterial.depthWrite = false;
-  this.material = [this.backgroundMaterial, this.borderMaterial, this.imageMaterial];
+  this.material = new THREE.MultiMaterial([this.backgroundMaterial, this.borderMaterial, this.imageMaterial]);
   this.material.side = THREE.DoubleSide;
   this.guiSys = guiSys;
   this.zIndex = 0;
@@ -3375,11 +3384,6 @@ function UIView(guiSys, params) {
   this.textMesh.type = 'SDFText';
   this.textMesh.textClip = [-16384, -16384, 16384, 16384];
   this.textMesh.visible = false;
-  this.textMesh.onBeforeRender = function (renderer, scene, camera, geometry, material, group) {
-    if (geometry && geometry.isSDFText) {
-      geometry.onBeforeRender(this, material);
-    }
-  };
   this.textFontParms = {
     AlphaCenter: 0.47,
     ColorCenter: 0.5
@@ -4825,7 +4829,9 @@ var Player = function () {
       if (!this.vrDisplay || !this.effect) {
         return Promise.reject('Cannot enter VR, no display detected');
       }
-      return this.effect.requestPresent().then(function () {
+      return this.effect.requestPresent([{
+        source: this.glRenderer.domElement
+      }]).then(function () {
         _this2.onEnterVR && _this2.onEnterVR();
         _this2.overlay.setVRButtonText('Exit VR');
         _this2.overlay.setVRButtonHandler(_this2.exitVR);
