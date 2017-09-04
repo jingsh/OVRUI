@@ -610,7 +610,7 @@ export function BitmapFontGeometry(fontObject, text, fontHeight, config = {}) {
     materials.push(lastFontObject.material);
   }
   this.computeBoundingSphere();
-  this.materials = new THREE.MultiMaterial(materials);
+  this.materials = materials;
 }
 
 BitmapFontGeometry.prototype = Object.create(THREE.BufferGeometry.prototype);

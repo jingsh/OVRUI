@@ -101,11 +101,11 @@ export default function UIView(guiSys, params) {
   this.imageMaterial.transparent = true;
   this.imageMaterial.visible = false;
   this.imageMaterial.depthWrite = false;
-  this.material = new THREE.MultiMaterial([
+  this.material = [
     this.backgroundMaterial,
     this.borderMaterial,
     this.imageMaterial,
-  ]);
+  ];
   this.material.side = THREE.DoubleSide;
   this.guiSys = guiSys;
   this.zIndex = 0;
