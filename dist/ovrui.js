@@ -1330,11 +1330,26 @@ function loadFont(fontName, fontTexture, loader) {
     },
     textColor: {
       type: 'v4',
-      value: new THREE.Vector4()
+      dynamic: true,
+      value: new THREE.Vector4(),
+      onUpdateCallback: function onUpdateCallback(object, camera) {
+        if (object.parent.textColor) {
+          this.value.set(object.parent.textColor.r, object.parent.textColor.g, object.parent.textColor.b, object.opacity);
+        }
+      }
     },
     clipRegion: {
       type: 'v4',
-      value: new THREE.Vector4(-16384, -16384, 16384, 16384)
+      dynamic: true,
+      value: new THREE.Vector4(-16384, -16384, 16384, 16384),
+      onUpdateCallback: function onUpdateCallback(object, camera) {
+        var textClip = object.textClip;
+        if (textClip && object.parent.clippingEnabled) {
+          this.value.set(textClip[0], textClip[1], textClip[2], textClip[3]);
+        } else {
+          this.value.set(-16384, -16384, 16384, 16384);
+        }
+      }
     }
   };
 
