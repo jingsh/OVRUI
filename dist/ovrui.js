@@ -1284,6 +1284,20 @@ function BitmapFontGeometry(fontObject, text, fontHeight) {
   }
 
   this.type = 'SDFText';
+
+  this.isSDFText = true;
+  this.onBeforeRender = function (object, material) {
+    if (object.parent.textColor) {
+      material.uniforms.textColor.value.set(object.parent.textColor.r, object.parent.textColor.g, object.parent.textColor.b, object.opacity);
+    }
+    var textClip = object.textClip;
+    if (textClip && object.parent.clippingEnabled) {
+      material.uniforms.clipRegion.value.set(textClip[0], textClip[1], textClip[2], textClip[3]);
+    } else {
+      material.uniforms.clipRegion.value.set(-16384, -16384, 16384, 16384);
+    }
+  };
+
   this.textClip = [-16384, -16384, 16384, 16384];
   this.addAttribute('position', new THREE.BufferAttribute(positionsBuffer, 3));
   this.addAttribute('uv', new THREE.BufferAttribute(texCoordBuffer, 2));
@@ -3384,6 +3398,12 @@ function UIView(guiSys, params) {
   this.textMesh.type = 'SDFText';
   this.textMesh.textClip = [-16384, -16384, 16384, 16384];
   this.textMesh.visible = false;
+
+  this.textMesh.onBeforeRender = function (renderer, scene, camera, geometry, material, group) {
+    if (geometry && geometry.isSDFText) {
+      geometry.onBeforeRender(this, material);
+    }
+  };
   this.textFontParms = {
     AlphaCenter: 0.47,
     ColorCenter: 0.5
