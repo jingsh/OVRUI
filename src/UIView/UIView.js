@@ -153,6 +153,19 @@ export default function UIView(guiSys, params) {
   this.textMesh.type = 'SDFText';
   this.textMesh.textClip = [-16384, -16384, 16384, 16384];
   this.textMesh.visible = false;
+  // add `onBeforeRender` callback
+  this.textMesh.onBeforeRender = function(
+    renderer,
+    scene,
+    camera,
+    geometry,
+    material,
+    group,
+  ) {
+    if (geometry && geometry.isSDFText) {
+      geometry.onBeforeRender(this, material);
+    }
+  };
   this.textFontParms = {
     AlphaCenter: 0.47,
     ColorCenter: 0.5,
